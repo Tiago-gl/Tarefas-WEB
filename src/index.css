@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+}
+
+body {
+  min-height: 100vh;
+}
+
+.modal-backdrop {
+  background: rgba(15, 23, 42, 0.6);
+}
