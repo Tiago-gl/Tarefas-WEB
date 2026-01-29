@@ -87,6 +87,7 @@ export default function App() {
   const [draggingId, setDraggingId] = useState(null)
   const [dragOverId, setDragOverId] = useState(null)
   const [isReordering, setIsReordering] = useState(false)
+  const totalCusto = tarefas.reduce((acc, tarefa) => acc + Number(tarefa.custo || 0), 0)
 
   const fetchTarefas = async () => {
     setLoading(true)
@@ -148,8 +149,18 @@ export default function App() {
     setActionMessage('')
 
     const errors = {}
-    if (!formData.nome || !formData.nome.trim()) {
+    const nomeNormalizado = (formData.nome || '').trim()
+    if (!nomeNormalizado) {
       errors.nome = 'Nome e obrigatorio.'
+    } else {
+      const nomeBase = nomeNormalizado.toLowerCase()
+      const nomeDuplicado = tarefas.some((tarefa) => {
+        if (editingId && tarefa.id === editingId) return false
+        return String(tarefa.nome || '').trim().toLowerCase() === nomeBase
+      })
+      if (nomeDuplicado) {
+        errors.nome = 'Ja existe uma tarefa com esse nome.'
+      }
     }
 
     if (formData.custo === '' || formData.custo === null) {
@@ -171,7 +182,7 @@ export default function App() {
     }
 
     const payload = {
-      nome: formData.nome.trim(),
+      nome: nomeNormalizado,
       custo: Number(formData.custo),
       data_limite: isoDate
     }
@@ -192,6 +203,13 @@ export default function App() {
       const body = await safeJson(res)
       if (res.status === 400 && body.errors) {
         setFormErrors(body.errors)
+        return
+      }
+      if (res.status === 409) {
+        setFormErrors((prev) => ({
+          ...prev,
+          nome: 'Ja existe uma tarefa com esse nome.'
+        }))
         return
       }
       setActionMessage(body.error || 'Erro ao salvar tarefa.')
@@ -318,8 +336,8 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-sand via-white to-accentSoft/40 px-4 py-10 sm:px-8">
-      <div className="mx-auto max-w-5xl">
+    <div className="flex min-h-screen flex-col bg-gradient-to-br from-sand via-white to-accentSoft/40 px-4 pb-28 pt-10 sm:px-8">
+      <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col min-h-0">
         <header className="mb-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm uppercase tracking-[0.3em] text-gray-500">Lista de prioridades</p>
@@ -346,7 +364,7 @@ export default function App() {
           </div>
         )}
 
-        <div className="rounded-3xl bg-white p-6 shadow-xl shadow-black/5">
+        <div className="min-h-0 flex flex-1 flex-col rounded-3xl bg-white p-6 shadow-xl shadow-black/5">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold">Tarefas cadastradas</h2>
             {(loading || isReordering) && (
@@ -355,7 +373,7 @@ export default function App() {
               </span>
             )}
           </div>
-          <div className="overflow-x-auto">
+          <div className="flex-1 overflow-auto">
             <table className="w-full text-left text-sm">
               <thead className="text-xs uppercase tracking-widest text-gray-400">
                 <tr>
@@ -468,6 +486,15 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      <footer className="fixed bottom-0 left-0 right-0 z-30 border-t border-ink/10 bg-white/90 px-4 py-4 backdrop-blur sm:px-8">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 text-sm text-ink sm:flex-row sm:items-center sm:justify-between">
+          <span className="font-semibold">Total de tarefas: {tarefas.length}</span>
+          <span className="text-gray-600">
+            Somatorio dos custos: <strong className="text-ink">{formatCurrency(totalCusto)}</strong>
+          </span>
+        </div>
+      </footer>
 
       {formOpen && (
         <div className="fixed inset-0 z-40 flex items-center justify-center px-4 modal-backdrop">
