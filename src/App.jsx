@@ -64,6 +64,8 @@ function isoToDateInput(isoDate) {
   return `${year}-${month}-${day}`
 }
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
 async function safeJson(res) {
   try {
     return await res.json()
@@ -89,26 +91,43 @@ export default function App() {
   const [isReordering, setIsReordering] = useState(false)
   const totalCusto = tarefas.reduce((acc, tarefa) => acc + Number(tarefa.custo || 0), 0)
 
-  const fetchTarefas = async () => {
+  const fetchTarefas = async ({ retries = 0, retryDelayMs = 2000 } = {}) => {
     setLoading(true)
     setError('')
-    try {
-      const res = await fetch(apiUrl('/api/tarefas'))
-      if (!res.ok) {
-        const body = await safeJson(res)
-        throw new Error(body.error || 'Erro ao carregar tarefas.')
+    let lastError = null
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try {
+        const res = await fetch(apiUrl('/api/tarefas'))
+        if (!res.ok) {
+          const body = await safeJson(res)
+          throw new Error(body.error || 'Erro ao carregar tarefas.')
+        }
+        const data = await res.json()
+        setTarefas(Array.isArray(data) ? data : [])
+        setLoading(false)
+        return
+      } catch (err) {
+        lastError = err
+        if (attempt < retries) {
+          await wait(retryDelayMs * (attempt + 1))
+        }
       }
-      const data = await res.json()
-      setTarefas(Array.isArray(data) ? data : [])
-    } catch (err) {
-      setError(err.message || 'Erro ao carregar tarefas.')
-    } finally {
-      setLoading(false)
     }
+
+    setError(lastError?.message || 'Erro ao carregar tarefas.')
+    setLoading(false)
   }
 
   useEffect(() => {
-    fetchTarefas()
+    fetchTarefas({ retries: 5, retryDelayMs: 2000 })
+  }, [])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetch(apiUrl('/api/health')).catch(() => {})
+    }, 5 * 60 * 1000)
+
+    return () => clearInterval(interval)
   }, [])
 
   const openCreate = () => {
