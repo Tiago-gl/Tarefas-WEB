@@ -84,6 +84,9 @@ export default function App() {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleteId, setDeleteId] = useState(null)
   const [actionMessage, setActionMessage] = useState('')
+  const [draggingId, setDraggingId] = useState(null)
+  const [dragOverId, setDragOverId] = useState(null)
+  const [isReordering, setIsReordering] = useState(false)
 
   const fetchTarefas = async () => {
     setLoading(true)
@@ -224,7 +227,7 @@ export default function App() {
     await fetchTarefas()
   }
 
-  const moveTarefa = async (id, direction) => {
+  const moveTarefaBase = async (id, direction, { suppressFetch } = {}) => {
     setActionMessage('')
     const res = await fetch(apiUrl(`/api/tarefas/${id}/mover`), {
       method: 'PATCH',
@@ -240,7 +243,78 @@ export default function App() {
       return
     }
 
+    if (!suppressFetch) {
+      await fetchTarefas()
+    }
+  }
+
+  const moveTarefa = async (id, direction) => {
+    await moveTarefaBase(id, direction)
+  }
+
+  const resetDragState = () => {
+    setDraggingId(null)
+    setDragOverId(null)
+  }
+
+  const handleDragStart = (id) => (event) => {
+    const normalizedId = String(id)
+    setDraggingId(normalizedId)
+    setDragOverId(null)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', normalizedId)
+  }
+
+  const handleDragOver = (id) => (event) => {
+    event.preventDefault()
+    const normalizedId = String(id)
+    if (dragOverId !== normalizedId) {
+      setDragOverId(normalizedId)
+    }
+    event.dataTransfer.dropEffect = 'move'
+  }
+
+  const handleDrop = (targetId) => async (event) => {
+    event.preventDefault()
+    const draggedId = draggingId ?? event.dataTransfer.getData('text/plain')
+    resetDragState()
+    if (!draggedId || draggedId === String(targetId)) return
+
+    const fromIndex = tarefas.findIndex((tarefa) => String(tarefa.id) === draggedId)
+    const toIndex = tarefas.findIndex((tarefa) => String(tarefa.id) === String(targetId))
+    if (fromIndex === -1 || toIndex === -1) return
+    const draggedTask = tarefas[fromIndex]
+    if (!draggedTask) return
+
+    const steps = Math.abs(toIndex - fromIndex)
+    if (steps === 0) return
+
+    setIsReordering(true)
+    setActionMessage('')
+    const direction = toIndex > fromIndex ? 'down' : 'up'
+    for (let i = 0; i < steps; i += 1) {
+      // Keep the backend swap logic, but only refresh once at the end.
+      const res = await fetch(apiUrl(`/api/tarefas/${draggedTask.id}/mover`), {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ direction })
+      })
+      if (!res.ok) {
+        const body = await safeJson(res)
+        setActionMessage(body.error || 'Erro ao reordenar tarefa.')
+        setIsReordering(false)
+        return
+      }
+    }
+
     await fetchTarefas()
+    setIsReordering(false)
+  }
+
+  const handleDragEnd = () => {
+    resetDragState()
   }
 
   return (
@@ -275,7 +349,11 @@ export default function App() {
         <div className="rounded-3xl bg-white p-6 shadow-xl shadow-black/5">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold">Tarefas cadastradas</h2>
-            {loading && <span className="text-sm text-gray-500">Carregando...</span>}
+            {(loading || isReordering) && (
+              <span className="text-sm text-gray-500">
+                {loading ? 'Carregando...' : 'Reordenando...'}
+              </span>
+            )}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -284,7 +362,7 @@ export default function App() {
                   <th className="px-3 py-3">Nome</th>
                   <th className="px-3 py-3">Custo</th>
                   <th className="px-3 py-3">Data limite</th>
-                  <th className="px-3 py-3 text-right">Acoes</th>
+                  <th className="px-3 py-3 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -296,9 +374,18 @@ export default function App() {
                   return (
                     <tr
                       key={tarefa.id}
-                      className={`border-t ${
+                      draggable={!isReordering}
+                      onDragStart={handleDragStart(tarefa.id)}
+                      onDragEnd={handleDragEnd}
+                      onDragOver={handleDragOver(tarefa.id)}
+                      onDrop={handleDrop(tarefa.id)}
+                      className={`border-t transition ${
                         isHighCost ? 'bg-accentSoft/70' : 'bg-white'
-                      }`}
+                      } ${
+                        dragOverId === String(tarefa.id) && draggingId !== String(tarefa.id)
+                          ? 'ring-2 ring-accent/40'
+                          : ''
+                      } ${draggingId === String(tarefa.id) ? 'opacity-60' : ''}`}
                     >
                       <td className="px-3 py-4 font-medium text-ink">{tarefa.nome}</td>
                       <td className="px-3 py-4">{formatCurrency(tarefa.custo)}</td>
@@ -307,33 +394,69 @@ export default function App() {
                         <div className="flex flex-wrap justify-end gap-2">
                           <button
                             type="button"
+                            title="Editar"
                             onClick={() => openEdit(tarefa)}
-                            className="rounded-full border border-ink/10 px-4 py-2 text-xs font-semibold uppercase tracking-widest text-ink transition hover:border-ink hover:bg-ink hover:text-white"
+                            className="flex h-9 w-9 items-center justify-center rounded-full border border-ink/10 text-ink transition hover:border-ink hover:bg-ink hover:text-white"
+                            aria-label={`Editar ${tarefa.nome}`}
                           >
-                            Editar
+                            <svg
+                              viewBox="0 0 24 24"
+                              className="h-4 w-4"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.7"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M12 20h9" />
+                              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                            </svg>
                           </button>
                           <button
                             type="button"
+                            title="Excluir"
                             onClick={() => requestDelete(tarefa.id)}
-                            className="rounded-full border border-red-200 px-4 py-2 text-xs font-semibold uppercase tracking-widest text-red-600 transition hover:border-red-500 hover:bg-red-500 hover:text-white"
+                            className="flex h-9 w-9 items-center justify-center rounded-full border border-red-200 text-red-600 transition hover:border-red-500 hover:bg-red-500 hover:text-white"
+                            aria-label={`Excluir ${tarefa.nome}`}
                           >
-                            Excluir
+                            <svg
+                              viewBox="0 0 24 24"
+                              className="h-4 w-4"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.7"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M3 6h18" />
+                              <path d="M8 6V4h8v2" />
+                              <path d="M6 6l1 14h10l1-14" />
+                              <path d="M10 11v6" />
+                              <path d="M14 11v6" />
+                            </svg>
                           </button>
                           <button
                             type="button"
-                            disabled={isFirst}
-                            onClick={() => moveTarefa(tarefa.id, 'up')}
-                            className="rounded-full border border-ink/10 px-3 py-2 text-xs font-semibold text-ink transition hover:border-ink hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                            title="Arraste para reordenar"
+                            className="flex h-9 w-9 items-center justify-center rounded-full border border-ink/10 text-ink transition hover:border-ink hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                            disabled={isReordering}
+                            aria-label={`Arraste para reordenar ${tarefa.nome}`}
                           >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isLast}
-                            onClick={() => moveTarefa(tarefa.id, 'down')}
-                            className="rounded-full border border-ink/10 px-3 py-2 text-xs font-semibold text-ink transition hover:border-ink hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            ↓
+                            <svg
+                              viewBox="0 0 24 24"
+                              className="h-4 w-4"
+                              fill="currentColor"
+                              aria-hidden="true"
+                            >
+                              <circle cx="9" cy="5" r="1.6" />
+                              <circle cx="15" cy="5" r="1.6" />
+                              <circle cx="9" cy="12" r="1.6" />
+                              <circle cx="15" cy="12" r="1.6" />
+                              <circle cx="9" cy="19" r="1.6" />
+                              <circle cx="15" cy="19" r="1.6" />
+                            </svg>
                           </button>
                         </div>
                       </td>
@@ -386,7 +509,7 @@ export default function App() {
                 <label className="text-xs font-semibold uppercase tracking-widest text-gray-400">
                   Data limite (dd/MM/yyyy)
                 </label>
-                <div className="mt-2 flex items-center gap-2">
+                <div className="mt-2 relative">
                   <input
                     type="text"
                     value={formData.data_limite}
@@ -396,7 +519,7 @@ export default function App() {
                         data_limite: normalizeDateInput(event.target.value)
                       }))
                     }
-                    className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-sm outline-none transition focus:border-ink"
+                    className="w-full rounded-2xl border border-gray-200 px-4 py-3 pr-12 text-sm outline-none transition focus:border-ink"
                     placeholder="31/12/2026"
                     inputMode="numeric"
                     maxLength={10}
@@ -412,9 +535,22 @@ export default function App() {
                         datePickerRef.current.click()
                       }
                     }}
-                    className="rounded-2xl border border-ink/10 px-4 py-3 text-xs font-semibold uppercase tracking-widest text-ink transition hover:border-ink"
+                    className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-ink/10 text-ink transition hover:border-ink hover:bg-ink hover:text-white"
+                    aria-label="Abrir calendario"
                   >
-                    Calendario
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <rect x="3" y="5" width="18" height="16" rx="2" />
+                      <path d="M16 3v4M8 3v4M3 10h18" />
+                    </svg>
                   </button>
                   <input
                     ref={datePickerRef}
