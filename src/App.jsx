@@ -76,6 +76,7 @@ async function safeJson(res) {
 
 export default function App() {
   const datePickerRef = useRef(null)
+  const nomeInputRef = useRef(null)
   const [tarefas, setTarefas] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -130,6 +131,14 @@ export default function App() {
     return () => clearInterval(interval)
   }, [])
 
+  useEffect(() => {
+    if (!formOpen) return undefined
+    const frameId = window.requestAnimationFrame(() => {
+      nomeInputRef.current?.focus()
+    })
+    return () => window.cancelAnimationFrame(frameId)
+  }, [formOpen, editingId])
+
   const openCreate = () => {
     setEditingId(null)
     setFormData(emptyForm)
@@ -169,6 +178,7 @@ export default function App() {
 
     const errors = {}
     const nomeNormalizado = (formData.nome || '').trim()
+    const custoNumerico = Number(formData.custo)
     if (!nomeNormalizado) {
       errors.nome = 'Nome e obrigatorio.'
     } else {
@@ -184,9 +194,11 @@ export default function App() {
 
     if (formData.custo === '' || formData.custo === null) {
       errors.custo = 'Custo e obrigatorio.'
-    } else if (Number.isNaN(Number(formData.custo))) {
+    } else if (Number.isNaN(custoNumerico)) {
       errors.custo = 'Custo deve ser um numero.'
-    } else if (Number(formData.custo) < 0) {
+    } else if (!Number.isFinite(custoNumerico)) {
+      errors.custo = 'Custo fora do limite permitido.'
+    } else if (custoNumerico < 0) {
       errors.custo = 'Custo deve ser maior ou igual a zero.'
     }
 
@@ -202,7 +214,7 @@ export default function App() {
 
     const payload = {
       nome: nomeNormalizado,
-      custo: Number(formData.custo),
+      custo: custoNumerico,
       data_limite: isoDate
     }
 
@@ -396,6 +408,7 @@ export default function App() {
             <table className="w-full text-left text-sm">
               <thead className="text-xs uppercase tracking-widest text-gray-400">
                 <tr>
+                  <th className="px-3 py-3">ID</th>
                   <th className="px-3 py-3">Nome</th>
                   <th className="px-3 py-3">Custo</th>
                   <th className="px-3 py-3">Data limite</th>
@@ -424,6 +437,7 @@ export default function App() {
                           : ''
                       } ${draggingId === String(tarefa.id) ? 'opacity-60' : ''}`}
                     >
+                      <td className="px-3 py-4 font-mono text-xs text-gray-500">{tarefa.id}</td>
                       <td className="px-3 py-4 font-medium text-ink">{tarefa.nome}</td>
                       <td className="px-3 py-4">{formatCurrency(tarefa.custo)}</td>
                       <td className="px-3 py-4">{formatDateBR(tarefa.data_limite)}</td>
@@ -525,6 +539,7 @@ export default function App() {
               <div>
                 <label className="text-xs font-semibold uppercase tracking-widest text-gray-400">Nome</label>
                 <input
+                  ref={nomeInputRef}
                   type="text"
                   value={formData.nome}
                   onChange={handleInputChange('nome')}
